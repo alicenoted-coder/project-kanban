@@ -22,7 +22,14 @@
 
 ## 部署
 
-推到 `main` 就會經由 `.github/workflows/pages.yml` 自動部署到 GitHub Pages，
-沒有建置步驟 —— 站台就是根目錄的 `index.html`。`.nojekyll` 用來關掉 Jekyll 處理。
-
 網址：<https://alicenoted-coder.github.io/project-kanban/>
+
+站台從 `gh-pages` 分支發佈。推到 `main` 之後，`.github/workflows/publish.yml`
+會把 `main` 原樣鏡像到 `gh-pages`，GitHub 收到那一推就重建站台。沒有建置步驟 ——
+站台就是根目錄的 `index.html`，`.nojekyll` 用來關掉 Jekyll 處理。
+
+`gh-pages` 是機器維護的鏡像，不要直接在上面改東西，下一次推 `main` 就會被蓋掉。
+
+沒有用 `actions/deploy-pages`，因為那需要把 Pages 來源改成 GitHub Actions，
+而建立或變更 Pages 設定的 API 不開放給 workflow 的 `GITHUB_TOKEN`
+（`Resource not accessible by integration`）。

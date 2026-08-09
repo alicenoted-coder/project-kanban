@@ -1,0 +1,28 @@
+name: Publish to gh-pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 只需要能推分支；Pages 本身由 gh-pages 的推送觸發重建
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-gh-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 站台從 gh-pages 分支發佈，所以這裡把 main 原樣鏡像過去。
+      # 不用 actions/deploy-pages —— 那需要把 Pages 來源改成 GitHub Actions，
+      # 而建立／變更 Pages 設定的 API 不開放給 workflow 的 GITHUB_TOKEN。
+      - name: Mirror main to gh-pages
+        run: git push --force origin HEAD:gh-pages
