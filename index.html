@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="only light">
+<title>佈告欄</title>
+<style>
+  /* ============================================================
+     Poke 4 直式佈告欄
+     語彙：打卡格 —— 方格只有空的或實心的，沒有中間狀態
+     方格承擔三種意義：下一步有沒有定、欄位位置、時間長度
+     e-ink：純黑白、無灰階、無動畫、大實心塊
+     ============================================================ */
+
+  :root {
+    color-scheme: light;
+    --ink: #000;
+    --paper: #fff;
+    --tap: 76px;
+    --pad: 20px;
+  }
+
+  * {
+    box-sizing: border-box; margin: 0; padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  html, body { height: 100%; background: #fff; color: #000; overflow: hidden; }
+
+  body {
+    font-family: "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC",
+                 "Source Han Sans TC", "Microsoft JhengHei", sans-serif;
+    font-size: 17px; line-height: 1.5;
+    -webkit-font-smoothing: none;
+    user-select: none;
+  }
+
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+
+  .shell { height: 100%; display: flex; flex-direction: column; max-width: 620px; margin: 0 auto; }
+
+  /* ===== 標頭 ===== */
+  .masthead {
+    flex: 0 0 auto; padding: 15px var(--pad) 12px;
+    border-bottom: 3px solid var(--ink);
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+  }
+  .date-block { line-height: 1; }
+  .weekday { font-size: 12px; letter-spacing: 0.3em; font-weight: 700; margin-bottom: 6px; }
+  .daynum { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+  .daynum .month { font-size: 18px; font-weight: 400; }
+
+  .head-right { text-align: right; line-height: 1.3; }
+  .punch-strip { display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-height: 14px; }
+  .strip-cell { width: 14px; height: 14px; border: 2px solid var(--ink); background: var(--paper); }
+  .strip-cell.filled { background: var(--ink); }
+  .head-time { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; margin-top: 8px; }
+
+  /* ===== 內容區 ===== */
+  .stage { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .stage::-webkit-scrollbar { width: 0; }
+  .view { display: none; }
+  .view.on { display: block; }
+
+  /* ===== 時間尺：一格 = 15 分 ===== */
+  .ruler { display: flex; align-items: center; gap: 4px; }
+  .unit { width: 11px; height: 11px; background: var(--ink); }
+  .unit.half { width: 5px; }
+  .ruler-label { font-size: 13px; font-weight: 700; letter-spacing: 0.05em; margin-left: 7px; }
+
+  /* ===== 一覽 ===== */
+  .group-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 13px var(--pad) 11px;
+    border-bottom: 3px solid var(--ink);
+    border-top: 1px solid var(--ink);
+  }
+  .group-head:first-child { border-top: 0; }
+  .group-head .gname { font-size: 13px; font-weight: 700; letter-spacing: 0.22em; }
+  .group-head .gcount { font-size: 20px; font-weight: 700; }
+
+  .brief {
+    padding: 12px var(--pad) 13px;
+    border-bottom: 1px solid var(--ink);
+    min-height: 68px;
+  }
+  .brief-top {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  }
+  .brief-name { font-size: 17px; font-weight: 700; line-height: 1.35; word-break: break-word; }
+  .brief-est { flex: 0 0 auto; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
+  .brief-next { font-size: 15px; line-height: 1.45; margin-top: 5px; word-break: break-word; }
+  .brief-next.blank { opacity: 0.4; }
+  .brief.settled .brief-name { opacity: 0.45; font-weight: 400; }
+
+  .overview-cap {
+    padding: 17px var(--pad) 30px; font-size: 13px;
+    line-height: 1.7; border-top: 3px solid var(--ink);
+  }
+
+  /* ===== 看板列 ===== */
+  .row { display: flex; align-items: stretch; border-bottom: 1px solid var(--ink); min-height: var(--tap); }
+  .row-body { flex: 1 1 auto; padding: 13px var(--pad); min-width: 0; }
+
+  .tag { font-size: 12px; font-weight: 700; letter-spacing: 0.18em; margin-bottom: 5px; opacity: 0.75; }
+  .step { font-size: 20px; line-height: 1.35; word-break: break-word; }
+  .step.blank { opacity: 0.4; }
+  .meta { margin-top: 9px; }
+
+  .act {
+    flex: 0 0 var(--tap); border-left: 1px solid var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 700; line-height: 1;
+  }
+  .act.narrow { flex: 0 0 54px; font-size: 21px; }
+  .back, .kill { display: none; }
+  body.editing .back, body.editing .kill { display: flex; }
+
+  .inline-edit {
+    width: 100%; border: 0; border-bottom: 3px solid var(--ink);
+    background: transparent; font: inherit; font-size: 20px;
+    color: var(--ink); padding: 2px 0 5px; outline: 0;
+  }
+
+  /* ===== 新增列 ===== */
+  .adder { display: flex; border-bottom: 1px solid var(--ink); min-height: var(--tap); }
+  .adder input {
+    flex: 1 1 auto; border: 0; outline: 0; background: transparent;
+    font: inherit; font-size: 19px; color: var(--ink);
+    padding: 14px var(--pad); min-width: 0;
+  }
+  .adder input::placeholder { color: #000; opacity: 0.35; }
+  .adder button {
+    flex: 0 0 var(--tap); border: 0; border-left: 1px solid var(--ink);
+    background: var(--paper); color: var(--ink);
+    font: inherit; font-size: 30px; font-weight: 700; line-height: 1;
+  }
+
+  .tools { padding: 17px var(--pad) 30px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .tool {
+    border: 2px solid var(--ink); background: var(--paper); color: var(--ink);
+    font: inherit; font-size: 14px; font-weight: 700; letter-spacing: 0.08em;
+    padding: 11px 15px; min-height: 48px;
+  }
+  .tool.active { background: var(--ink); color: var(--paper); }
+
+  .empty { padding: 42px var(--pad); font-size: 17px; line-height: 1.7; }
+  .empty b { display: block; font-size: 21px; margin-bottom: 8px; }
+
+  /* ===== 看板頂部 ===== */
+  .colbar { border-bottom: 3px solid var(--ink); }
+  .colbar-main { display: flex; align-items: stretch; min-height: 60px; }
+  .colnav {
+    flex: 0 0 56px; border: 0; border-right: 1px solid var(--ink);
+    background: var(--paper); color: var(--ink);
+    font: inherit; font-size: 24px; font-weight: 700; line-height: 1;
+  }
+  .colnav.right { border-right: 0; border-left: 1px solid var(--ink); }
+  .colnav[disabled] { opacity: 0.2; }
+  .colname { flex: 1 1 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--pad); }
+  .colname .nm { font-size: 19px; font-weight: 700; letter-spacing: 0.1em; }
+  .colname .ct { font-size: 25px; font-weight: 700; }
+  .colpips { display: flex; gap: 5px; padding: 10px var(--pad) 12px; }
+  .pip { flex: 1 1 0; height: 9px; border: 2px solid var(--ink); background: var(--paper); }
+  .pip.here { background: var(--ink); }
+
+  /* ===== 時間篩選 ===== */
+  .sieve { display: flex; border-bottom: 3px solid var(--ink); }
+  .sieve-label {
+    flex: 0 0 auto; display: flex; align-items: center;
+    padding: 0 12px 0 var(--pad);
+    font-size: 12px; font-weight: 700; letter-spacing: 0.14em;
+  }
+  .sieve-opts { flex: 1 1 auto; display: flex; }
+  .sv {
+    flex: 1 1 0; border: 0; border-left: 1px solid var(--ink);
+    background: var(--paper); color: var(--ink);
+    font: inherit; font-size: 14px; font-weight: 700; height: 56px; letter-spacing: 0.04em;
+  }
+  .sv.on { background: var(--ink); color: var(--paper); }
+
+  .board-note { padding: 17px var(--pad) 30px; font-size: 13px; line-height: 1.7; border-top: 3px solid var(--ink); }
+
+  /* ===== 心錨 ===== */
+  .anchor {
+    min-height: 100%; padding: 56px 28px;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+  }
+  .anchor-mark { font-size: 11px; letter-spacing: 0.4em; font-weight: 700; margin-bottom: 34px; }
+  .anchor-text {
+    font-family: "Noto Serif CJK TC", "Noto Serif TC", "Songti TC", "Source Han Serif TC", serif;
+    font-size: 27px; line-height: 1.85; letter-spacing: 0.02em;
+  }
+  .anchor-rule { width: 44px; height: 3px; background: var(--ink); margin: 34px 0 16px; }
+  .anchor-from { font-size: 12px; letter-spacing: 0.14em; }
+
+  /* ===== 分頁 ===== */
+  .tabs { flex: 0 0 auto; display: flex; border-top: 3px solid var(--ink); }
+  .tab {
+    flex: 1 1 0; border: 0; border-left: 1px solid var(--ink);
+    background: var(--paper); color: var(--ink);
+    font: inherit; font-size: 15px; font-weight: 700; letter-spacing: 0.14em; height: 64px;
+  }
+  .tab:first-child { border-left: 0; }
+  .tab.on { background: var(--ink); color: var(--paper); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="masthead">
+    <div class="date-block">
+      <div class="weekday" id="weekday">週日</div>
+      <div class="daynum"><span id="daynum">9</span><span class="month" id="month"> / 8月</span></div>
+    </div>
+    <div class="head-right">
+      <div class="punch-strip" id="strip"></div>
+      <div class="head-time" id="headTime"></div>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+
+    <!-- 一覽 -->
+    <div class="view on" id="v-all">
+      <div id="overview"></div>
+      <div class="overview-cap" id="overviewCap"></div>
+    </div>
+
+    <!-- 看板 -->
+    <div class="view" id="v-board">
+      <div class="colbar">
+        <div class="colbar-main">
+          <button class="colnav" id="prevCol" aria-label="上一欄">‹</button>
+          <div class="colname">
+            <span class="nm" id="colName">進行中</span>
+            <span class="ct" id="colCount">0</span>
+          </div>
+          <button class="colnav right" id="nextCol" aria-label="下一欄">›</button>
+        </div>
+        <div class="colpips" id="colPips"></div>
+      </div>
+
+      <div class="sieve">
+        <div class="sieve-label">我現在有</div>
+        <div class="sieve-opts" id="sieve">
+          <button class="sv" data-min="15">15分</button>
+          <button class="sv" data-min="30">30分</button>
+          <button class="sv" data-min="60">1小時</button>
+          <button class="sv on" data-min="0">不限</button>
+        </div>
+      </div>
+
+      <div id="cards"></div>
+      <div class="adder" id="cardAdder">
+        <input id="newCard" type="text" placeholder="加一個專案到這一欄" maxlength="40"
+               autocomplete="off" autocorrect="off" spellcheck="false">
+        <button id="addCardBtn" aria-label="新增">＋</button>
+      </div>
+      <div class="tools">
+        <button class="tool" id="editBtn">編輯</button>
+      </div>
+      <div class="board-note" id="boardNote"></div>
+    </div>
+
+    <!-- 心錨 -->
+    <div class="view" id="v-anchor">
+      <div class="anchor">
+        <div class="anchor-mark">心 錨</div>
+        <div class="anchor-text" id="anchorText"></div>
+        <div class="anchor-rule"></div>
+        <div class="anchor-from" id="anchorFrom"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" data-view="all">一覽</button>
+    <button class="tab" data-view="board">看板</button>
+    <button class="tab" data-view="anchor">心錨</button>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var KEY = "poke-board-v3";
+  var OLD_KEYS = ["poke-board-v2", "poke-board-v1"];
+  var KANBAN_KEY = "project-kanban-v1";
+  var ROTATE_MS = 90000;
+  var PAUSE_MS = 180000;
+  var STEPS = [15, 30, 60, 120];
+
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  var store = {
+    get: function (k) {
+      if (window.storage && window.storage.get) {
+        return window.storage.get(k)
+          .then(function (r) { return r && r.value ? r.value : null; })
+          .catch(function () { return lsGet(k); });
+      }
+      return Promise.resolve(lsGet(k));
+    },
+    set: function (k, v) {
+      if (window.storage && window.storage.set) {
+        return window.storage.set(k, v).catch(function () { lsSet(k, v); });
+      }
+      lsSet(k, v);
+      return Promise.resolve();
+    }
+  };
+
+  /* ---------- 狀態 ---------- */
+  var state = {
+    col: 2,
+    sieve: 0,
+    board: [
+      { name: "概念", cards: [
+        { name: "營養品排程",     next: "列出手邊所有罐子", est: 30 },
+        { name: "成長軌跡對話框", next: "", est: 30 },
+        { name: "網紅美食地圖",   next: "", est: 30 },
+        { name: "AI 可改造看板",  next: "驗證 config-driven 可行性", est: 60 }
+      ]},
+      { name: "待辦", cards: [
+        { name: "箴言視覺化 Plugin", next: "翻 Obsidian plugin 起手範本", est: 60 },
+        { name: "股票交易日誌",      next: "", est: 30 }
+      ]},
+      { name: "進行中", cards: [
+        { name: "東西的數位身分證", next: "貼一張照片測 Gemini 辨識", est: 15 },
+        { name: "健身紀錄 App",     next: "體圍趨勢圖", est: 120 },
+        { name: "佈告欄",           next: "貼引磁片、掛上牆", est: 15 }
+      ]},
+      { name: "驗證中", cards: [
+        { name: "Gemini 多模態骨幹", next: "確認辨識準確度夠不夠用", est: 30 }
+      ]},
+      { name: "完成", cards: [
+        { name: "體圍追蹤模組",   next: "", est: 0 },
+        { name: "收容所索引",     next: "", est: 0 },
+        { name: "離職 Checklist", next: "", est: 0 },
+        { name: "六分鐘日記",     next: "", est: 0 }
+      ]}
+    ],
+    anchors: [
+      { text: "未來就是會比現在更好，<br>所以我根本不需要擔心。", from: "2026 · 06 · 19" },
+      { text: "打不贏就加入。", from: "PRINCIPLE  01" }
+    ]
+  };
+
+  var view = "all", rotating = true, pauseTimer = null;
+  var imported = false, editingId = null;
+
+  function lastIdx() { return state.board.length - 1; }
+
+  function mins(m) {
+    if (!m) return "—";
+    if (m < 60) return m + " 分";
+    var h = m / 60;
+    return (h % 1 === 0 ? h : h.toFixed(1)) + " 小時";
+  }
+
+  function ruler(m) {
+    var wrap = document.createElement("div");
+    wrap.className = "ruler";
+    if (!m) return wrap;
+    var full = Math.min(Math.floor(m / 15), 8);
+    for (var i = 0; i < full; i++) {
+      var u = document.createElement("div");
+      u.className = "unit";
+      wrap.appendChild(u);
+    }
+    if (m % 15 !== 0) {
+      var h = document.createElement("div");
+      h.className = "unit half";
+      wrap.appendChild(h);
+    }
+    var lb = document.createElement("div");
+    lb.className = "ruler-label";
+    lb.textContent = mins(m);
+    wrap.appendChild(lb);
+    return wrap;
+  }
+
+  /* ---------- 標頭：進行中的專案，實心 = 下一步已定 ---------- */
+  function renderHead() {
+    var d = new Date();
+    var names = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+    document.getElementById("weekday").textContent = names[d.getDay()];
+    document.getElementById("daynum").textContent = d.getDate();
+    document.getElementById("month").textContent = " / " + (d.getMonth() + 1) + "月";
+
+    var live = [];
+    state.board.forEach(function (c, i) {
+      if (i === lastIdx()) return;
+      c.cards.forEach(function (card) { live.push(card); });
+    });
+
+    var strip = document.getElementById("strip");
+    strip.innerHTML = "";
+    live.slice(0, 10).forEach(function (card) {
+      var c = document.createElement("div");
+      c.className = "strip-cell" + (card.next ? " filled" : "");
+      strip.appendChild(c);
+    });
+
+    var undecided = live.filter(function (c) { return !c.next; }).length;
+    document.getElementById("headTime").textContent = live.length
+      ? (undecided ? undecided + " 個還沒定下一步" : "每個都有下一步")
+      : "";
+  }
+
+  /* ---------- 一覽 ---------- */
+  function renderOverview() {
+    var host = document.getElementById("overview");
+    host.innerHTML = "";
+
+    state.board.forEach(function (col, ci) {
+      var settled = ci === lastIdx();
+
+      var gh = document.createElement("div");
+      gh.className = "group-head";
+      var gn = document.createElement("span");
+      gn.className = "gname";
+      gn.textContent = col.name;
+      var gc = document.createElement("span");
+      gc.className = "gcount";
+      gc.textContent = col.cards.length;
+      gh.appendChild(gn);
+      gh.appendChild(gc);
+      gh.addEventListener("click", function () {
+        state.sieve = 0; state.col = ci;
+        show("board"); touched();
+      });
+      host.appendChild(gh);
+
+      col.cards.forEach(function (card, xi) {
+        var b = document.createElement("div");
+        b.className = "brief" + (settled ? " settled" : "");
+
+        var top = document.createElement("div");
+        top.className = "brief-top";
+        var nm = document.createElement("div");
+        nm.className = "brief-name";
+        nm.textContent = card.name;
+        top.appendChild(nm);
+
+        if (!settled) {
+          var est = document.createElement("div");
+          est.className = "brief-est";
+          est.textContent = mins(card.est);
+          top.appendChild(est);
+        }
+        b.appendChild(top);
+
+        if (!settled) {
+          var nx = document.createElement("div");
+          nx.className = "brief-next" + (card.next ? "" : " blank");
+          nx.textContent = card.next || "還沒定下一步";
+          b.appendChild(nx);
+        }
+
+        // 點一覽的任何一列 → 跳到看板該欄去動它
+        b.addEventListener("click", function () {
+          state.sieve = 0; state.col = ci; editingId = null;
+          show("board"); touched();
+        });
+
+        host.appendChild(b);
+      });
+    });
+
+    var live = 0, total = 0, blank = 0;
+    state.board.forEach(function (c, i) {
+      if (i === lastIdx()) return;
+      c.cards.forEach(function (card) {
+        live++;
+        total += card.est || 0;
+        if (!card.next) blank++;
+      });
+    });
+
+    document.getElementById("overviewCap").innerHTML =
+      live + " 個進行中的專案，下一步加起來約 " + mins(total) + "。" +
+      (blank ? "其中 " + blank + " 個還沒定下一步 —— 點進去補。" : "") +
+      "<br>點任何一列可以跳到看板去改。";
+  }
+
+  /* ---------- 看板 ---------- */
+  function clampCol() {
+    if (state.col < 0) state.col = 0;
+    if (state.col > lastIdx()) state.col = lastIdx();
+  }
+
+  function renderBoard() {
+    clampCol();
+    var filtering = state.sieve > 0;
+    var col = state.board[state.col];
+
+    var list = [];
+    if (filtering) {
+      state.board.forEach(function (c, ci) {
+        if (ci === lastIdx()) return;
+        c.cards.forEach(function (card, xi) {
+          if (card.next && card.est && card.est <= state.sieve) {
+            list.push({ card: card, colIdx: ci, cardIdx: xi });
+          }
+        });
+      });
+      list.sort(function (a, b) { return a.card.est - b.card.est; });
+    } else {
+      col.cards.forEach(function (card, xi) {
+        list.push({ card: card, colIdx: state.col, cardIdx: xi });
+      });
+    }
+
+    document.getElementById("colName").textContent = filtering ? "做得完的" : col.name;
+    document.getElementById("colCount").textContent = list.length;
+    document.getElementById("prevCol").disabled = filtering;
+    document.getElementById("nextCol").disabled = filtering;
+    document.getElementById("cardAdder").style.display = filtering ? "none" : "flex";
+
+    var pips = document.getElementById("colPips");
+    pips.innerHTML = "";
+    state.board.forEach(function (c, i) {
+      var p = document.createElement("div");
+      p.className = "pip" + (!filtering && i === state.col ? " here" : "");
+      p.addEventListener("click", function () {
+        state.sieve = 0; state.col = i; editingId = null;
+        save(); renderBoard(); touched();
+      });
+      pips.appendChild(p);
+    });
+
+    var svs = document.querySelectorAll(".sv");
+    for (var s = 0; s < svs.length; s++) {
+      svs[s].className = "sv" + (Number(svs[s].getAttribute("data-min")) === state.sieve ? " on" : "");
+    }
+
+    var host = document.getElementById("cards");
+    host.innerHTML = "";
+
+    if (!list.length) {
+      var e = document.createElement("div");
+      e.className = "empty";
+      e.innerHTML = filtering
+        ? "<b>沒有這麼短的下一步。</b>換個時間長度，或把某個專案的下一步拆小一點。"
+        : "<b>這一欄是空的。</b>從下面加一個，或用 › 看下一欄。";
+      host.appendChild(e);
+    }
+
+    list.forEach(function (entry) {
+      var card = entry.card, ci = entry.colIdx, xi = entry.cardIdx;
+      var settled = ci === lastIdx();
+      var uid = ci + ":" + xi;
+
+      var row = document.createElement("div");
+      row.className = "row";
+
+      var body = document.createElement("div");
+      body.className = "row-body";
+
+      var tag = document.createElement("div");
+      tag.className = "tag";
+      tag.textContent = filtering ? state.board[ci].name + " · " + card.name : card.name;
+      body.appendChild(tag);
+
+      if (settled) {
+        var doneMark = document.createElement("div");
+        doneMark.className = "step blank";
+        doneMark.textContent = "已完成";
+        body.appendChild(doneMark);
+      } else if (editingId === uid) {
+        var inp = document.createElement("input");
+        inp.className = "inline-edit";
+        inp.type = "text";
+        inp.value = card.next || "";
+        inp.placeholder = "下一步做什麼？";
+        inp.maxLength = 70;
+        inp.setAttribute("autocomplete", "off");
+        inp.setAttribute("spellcheck", "false");
+        var committed = false;
+        function commit() {
+          if (committed) return;
+          committed = true;
+          card.next = inp.value.trim();
+          editingId = null;
+          save(); renderBoard(); renderHead(); touched();
+        }
+        inp.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+        });
+        inp.addEventListener("blur", commit);
+        body.appendChild(inp);
+        setTimeout(function () { inp.focus(); }, 30);
+      } else {
+        var step = document.createElement("div");
+        step.className = "step" + (card.next ? "" : " blank");
+        step.textContent = card.next || "還沒定下一步 —— 點這裡";
+        step.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          editingId = uid;
+          renderBoard(); touched();
+        });
+        body.appendChild(step);
+      }
+
+      if (!settled) {
+        var meta = document.createElement("div");
+        meta.className = "meta";
+        meta.appendChild(ruler(card.est || 0));
+        meta.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          card.est = nextEst(card.est);
+          save(); renderBoard(); touched();
+        });
+        body.appendChild(meta);
+      }
+
+      row.appendChild(body);
+
+      var back = document.createElement("div");
+      back.className = "act narrow back";
+      back.textContent = "←";
+      back.addEventListener("click", function (ev) { ev.stopPropagation(); move(ci, xi, -1); });
+      row.appendChild(back);
+
+      var fwd = document.createElement("div");
+      fwd.className = "act";
+      fwd.textContent = settled ? "✓" : "→";
+      if (!settled) {
+        fwd.addEventListener("click", function (ev) { ev.stopPropagation(); move(ci, xi, 1); });
+      }
+      row.appendChild(fwd);
+
+      var kill = document.createElement("div");
+      kill.className = "act narrow kill";
+      kill.textContent = "✕";
+      kill.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        state.board[ci].cards.splice(xi, 1);
+        save(); renderBoard(); renderHead(); touched();
+      });
+      row.appendChild(kill);
+
+      host.appendChild(row);
+    });
+
+    document.getElementById("boardNote").innerHTML = imported
+      ? "已從 project-kanban-v1 匯入一次。之後的異動只存在本機 poke-board-v3。"
+      : "點下一步可以改寫，點時間尺會在 15 分／30 分／1 小時／2 小時之間循環。";
+  }
+
+  function nextEst(cur) {
+    var i = STEPS.indexOf(cur);
+    return STEPS[(i + 1) % STEPS.length];
+  }
+
+  function move(ci, xi, dir) {
+    var toIdx = ci + dir;
+    if (toIdx < 0 || toIdx > lastIdx()) return;
+    var card = state.board[ci].cards.splice(xi, 1)[0];
+    if (toIdx === lastIdx()) { card.next = ""; card.est = 0; }
+    else if (!card.est) { card.est = 30; }
+    state.board[toIdx].cards.push(card);
+    editingId = null;
+    save(); renderBoard(); renderHead(); touched();
+  }
+
+  function addCard() {
+    var input = document.getElementById("newCard");
+    var v = input.value.trim();
+    if (!v) return;
+    state.board[state.col].cards.push({ name: v, next: "", est: 30 });
+    input.value = ""; input.blur();
+    save(); renderBoard(); renderHead(); touched();
+  }
+
+  function stepCol(d) {
+    if (state.sieve > 0) return;
+    state.col += d; clampCol(); editingId = null;
+    save(); renderBoard(); touched();
+  }
+
+  /* ---------- 匯入 ---------- */
+  function tryImport() {
+    try {
+      var raw = lsGet(KANBAN_KEY);
+      if (!raw) return false;
+      var got = normalise(JSON.parse(raw));
+      if (got && got.length) { state.board = got; return true; }
+    } catch (e) {}
+    return false;
+  }
+
+  function normalise(data) {
+    if (!data) return null;
+    var src = Array.isArray(data) ? data : (data.columns || data.lanes || data.board);
+    if (!src) return null;
+    var listed = Array.isArray(src) ? src : Object.keys(src).map(function (k) {
+      return { name: k, cards: src[k] };
+    });
+    var out = [];
+    listed.forEach(function (col) {
+      if (!col) return;
+      var cards = col.cards || col.items || col.tasks || [];
+      out.push({
+        name: col.name || col.title || col.id || "未命名",
+        cards: (Array.isArray(cards) ? cards : []).map(toCard)
+      });
+    });
+    return out.length ? out : null;
+  }
+
+  function toCard(c) {
+    if (typeof c === "string") return { name: c, next: "", est: 30 };
+    return {
+      name: c.name || c.title || c.text || "—",
+      next: c.next || c.nextStep || "",
+      est: typeof c.est === "number" ? c.est : 30
+    };
+  }
+
+  function migrate(b) {
+    if (!Array.isArray(b)) return null;
+    return b.map(function (col) {
+      return { name: col.name || "未命名", cards: (col.cards || []).map(toCard) };
+    });
+  }
+
+  /* ---------- 心錨 ---------- */
+  function renderAnchor() {
+    var i = Math.floor(Date.now() / 86400000) % state.anchors.length;
+    var a = state.anchors[i];
+    document.getElementById("anchorText").innerHTML = a.text;
+    document.getElementById("anchorFrom").textContent = a.from;
+  }
+
+  /* ---------- 切換與輪播 ---------- */
+  function show(name) {
+    view = name;
+    editingId = null;
+    ["all", "board", "anchor"].forEach(function (v) {
+      var el = document.getElementById("v-" + v);
+      if (el) el.className = "view" + (v === name ? " on" : "");
+    });
+    var tabs = document.querySelectorAll(".tab");
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].className = "tab" + (tabs[i].getAttribute("data-view") === name ? " on" : "");
+    }
+    document.getElementById("stage").scrollTop = 0;
+    if (name === "all") renderOverview();
+    if (name === "board") renderBoard();
+    if (name === "anchor") renderAnchor();
+    renderHead();
+  }
+
+  function rotate() {
+    if (!rotating) return;
+    var order = ["all", "board", "anchor"];
+    show(order[(order.indexOf(view) + 1) % order.length]);
+  }
+
+  function touched() {
+    rotating = false;
+    if (pauseTimer) clearTimeout(pauseTimer);
+    pauseTimer = setTimeout(function () { rotating = true; }, PAUSE_MS);
+  }
+
+  /* ---------- 儲存 / 載入 ---------- */
+  function save() {
+    state.imported = imported;
+    store.set(KEY, JSON.stringify(state));
+  }
+
+  function apply(s) {
+    var b = migrate(s.board);
+    if (b && b.length) state.board = b;
+    if (Array.isArray(s.anchors) && s.anchors.length) state.anchors = s.anchors;
+    if (typeof s.col === "number") state.col = s.col;
+    if (typeof s.sieve === "number") state.sieve = s.sieve;
+    if (s.imported) imported = true;
+  }
+
+  function load() {
+    return store.get(KEY).then(function (raw) {
+      if (raw) { try { apply(JSON.parse(raw)); return; } catch (e) {} }
+      var chain = Promise.resolve(false);
+      OLD_KEYS.forEach(function (k) {
+        chain = chain.then(function (done) {
+          if (done) return true;
+          return store.get(k).then(function (old) {
+            if (!old) return false;
+            try { apply(JSON.parse(old)); save(); return true; } catch (e) { return false; }
+          });
+        });
+      });
+      return chain.then(function (done) {
+        if (!done) { imported = tryImport(); if (imported) save(); }
+      });
+    });
+  }
+
+  /* ---------- 綁定 ---------- */
+  var tabs = document.querySelectorAll(".tab");
+  for (var i = 0; i < tabs.length; i++) {
+    (function (btn) {
+      btn.addEventListener("click", function () { show(btn.getAttribute("data-view")); touched(); });
+    })(tabs[i]);
+  }
+
+  document.getElementById("addCardBtn").addEventListener("click", addCard);
+  document.getElementById("newCard").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addCard(); }
+  });
+  document.getElementById("prevCol").addEventListener("click", function () { stepCol(-1); });
+  document.getElementById("nextCol").addEventListener("click", function () { stepCol(1); });
+
+  var svs = document.querySelectorAll(".sv");
+  for (var s = 0; s < svs.length; s++) {
+    (function (b) {
+      b.addEventListener("click", function () {
+        state.sieve = Number(b.getAttribute("data-min"));
+        editingId = null;
+        save(); renderBoard(); touched();
+      });
+    })(svs[s]);
+  }
+
+  document.getElementById("editBtn").addEventListener("click", function () {
+    var on = document.body.className.indexOf("editing") > -1;
+    document.body.className = on ? "" : "editing";
+    this.className = "tool" + (on ? "" : " active");
+    touched();
+  });
+
+  // 看板左右滑動切欄（e-ink 滑動不一定靈敏，‹ › 才是主要操作）
+  (function () {
+    var x0 = null, y0 = null;
+    var stage = document.getElementById("stage");
+    stage.addEventListener("touchstart", function (e) {
+      if (view !== "board" || e.touches.length !== 1) return;
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    }, { passive: true });
+    stage.addEventListener("touchend", function (e) {
+      if (view !== "board" || x0 === null) return;
+      var t = e.changedTouches[0];
+      var dx = t.clientX - x0, dy = t.clientY - y0;
+      if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) stepCol(dx < 0 ? 1 : -1);
+      x0 = null; y0 = null;
+    }, { passive: true });
+  })();
+
+  setInterval(renderHead, 60000);
+
+  /* ---------- 啟動 ---------- */
+  load().then(function () {
+    renderAnchor();
+    show("all");
+    setInterval(rotate, ROTATE_MS);
+  });
+})();
+</script>
+</body>
+</html>
