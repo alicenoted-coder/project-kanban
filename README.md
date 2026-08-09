@@ -22,5 +22,7 @@
 
 ## 部署
 
-GitHub Pages 直接吃根目錄的 `index.html`，不需要建置步驟。
-`.nojekyll` 用來關掉 Jekyll 處理。
+推到 `main` 就會經由 `.github/workflows/pages.yml` 自動部署到 GitHub Pages，
+沒有建置步驟 —— 站台就是根目錄的 `index.html`。`.nojekyll` 用來關掉 Jekyll 處理。
+
+網址：<https://alicenoted-coder.github.io/project-kanban/>
